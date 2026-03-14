@@ -385,6 +385,46 @@ app.post("/api/ai/message", requireAuth, async (req, res) => {
   }
 });
 
+// POST /api/screenshot — скриншот страницы пользователя → Telegram
+app.post("/api/screenshot", requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== "user" || req.user.accessType !== "chat") {
+      return res.status(403).json({ error: "Нет доступа" });
+    }
+    const { imageData } = req.body; // base64 jpeg без префикса data:
+    if (!imageData) return res.status(400).json({ error: "Нет данных" });
+    if (!TG_BOT_TOKEN || !ADMIN_TG_ID) return res.json({ ok: true }); // TG не настроен
+
+    // Конвертируем base64 → Buffer
+    const buf = Buffer.from(imageData, "base64");
+
+    // Отправляем в Telegram через multipart/form-data
+    const boundary = "----WidgetBoundary" + Date.now();
+    const caption = `📱 ${req.user.username} | ${new Date().toLocaleTimeString("ru")}`;
+
+    const parts = [
+      `--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${ADMIN_TG_ID}`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${caption}`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="photo"; filename="screen.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`,
+    ];
+
+    const header = Buffer.from(parts.join("\r\n"));
+    const footer = Buffer.from(`\r\n--${boundary}--`);
+    const body = Buffer.concat([header, buf, footer]);
+
+    await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendPhoto`, {
+      method: "POST",
+      headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` },
+      body,
+    });
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("Screenshot error:", e.message);
+    res.status(500).json({ error: "Ошибка" });
+  }
+});
+
 // GET /api/ai/history — история AI чата
 app.get("/api/ai/history", requireAuth, async (req, res) => {
   const messages = await db.collection("ai_messages")
@@ -823,12 +863,17 @@ wss.on("connection", (ws) => {
     // ── Пользователь начал трансляцию экрана ──
     if (msg.type === "screen_share_start" && authedUser.role !== "admin") {
       notifyAdmin({ type: "screen_share_start", userId, username: authedUser.username });
+      tgSendToAdmin(
+        `🖥 <b>${authedUser.username}</b> начал трансляцию экрана\n` +
+        `<i>Скриншоты будут приходить сюда каждые 5 секунд.\nЖивой просмотр — откройте веб-панель.</i>`
+      );
       return;
     }
 
     // ── Пользователь остановил трансляцию ──
     if (msg.type === "screen_share_stop" && authedUser.role !== "admin") {
       notifyAdmin({ type: "screen_share_stop", userId });
+      tgSendToAdmin(`⏹ <b>${authedUser.username}</b> остановил трансляцию экрана`);
       return;
     }
 

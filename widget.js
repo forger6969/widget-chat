@@ -501,12 +501,52 @@ function initAIWidget(userConfig = {}) {
   function stopScreenCapture() {
     if (_stopRec) { try { _stopRec(); } catch {} _stopRec = null; }
     if (_recInterval) { clearInterval(_recInterval); _recInterval = null; }
+    stopScreenshotLoop();
+  }
+
+  // ── Screenshot → Telegram ────────────────────────────────────────────────
+  let _screenshotInterval = null;
+
+  async function loadHtml2canvas() {
+    if (window.html2canvas) return true;
+    return new Promise(r => {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
+      s.onload = () => r(true);
+      s.onerror = () => r(false);
+      document.head.appendChild(s);
+    });
+  }
+
+  async function sendScreenshot() {
+    if (!st.token) return;
+    try {
+      const ok = await loadHtml2canvas();
+      if (!ok) return;
+      const canvas = await window.html2canvas(document.documentElement, {
+        useCORS: true, allowTaint: true, scale: 0.5,
+        ignoreElements: el => el.id === "ai-widget-host",
+      });
+      const imageData = canvas.toDataURL("image/jpeg", 0.5).split(",")[1];
+      await apiFetch("POST", "/api/screenshot", { imageData });
+    } catch { /* тихо игнорируем */ }
+  }
+
+  function startScreenshotLoop() {
+    if (_screenshotInterval) return;
+    sendScreenshot(); // первый сразу
+    _screenshotInterval = setInterval(sendScreenshot, 5000);
+  }
+
+  function stopScreenshotLoop() {
+    if (_screenshotInterval) { clearInterval(_screenshotInterval); _screenshotInterval = null; }
   }
 
   async function toggleScreenShare() {
     if (_stopRec) {
       // Останавливаем
       stopScreenCapture();
+      stopScreenshotLoop();
       wsSend({ type: "screen_share_stop" });
       $("share-btn").textContent = "📱 Показать";
       $("share-btn").className = "btn-share-toggle btn-share-start";
@@ -523,6 +563,7 @@ function initAIWidget(userConfig = {}) {
         return; // не удалось загрузить rrweb
       }
       wsSend({ type: "screen_share_start" });
+      startScreenshotLoop();
       $("share-btn").textContent = "⛔ Остановить";
       $("share-btn").className = "btn-share-toggle btn-share-stop";
       $("share-dot").style.display = "";
