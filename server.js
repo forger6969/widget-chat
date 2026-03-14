@@ -24,7 +24,9 @@ const GROQ_MODEL      = process.env.GROQ_MODEL      || "llama-3.1-8b-instant";
 const ADMIN_USERNAME  = process.env.ADMIN_USERNAME  || "admin";
 const ADMIN_PASSWORD  = process.env.ADMIN_PASSWORD  || "admin123";
 const TG_BOT_TOKEN    = process.env.TG_BOT_TOKEN    || "";
-const ADMIN_TG_ID     = process.env.ADMIN_TELEGRAM_ID || "";
+// Поддержка нескольких ID через запятую: "123456,789012"
+const ADMIN_TG_IDS    = (process.env.ADMIN_TELEGRAM_ID || "")
+  .split(",").map(s => s.trim()).filter(Boolean);
 
 // ── MongoDB ──────────────────────────────────────────────────────────────
 let db;
@@ -393,30 +395,29 @@ app.post("/api/screenshot", requireAuth, async (req, res) => {
     }
     const { imageData } = req.body; // base64 jpeg без префикса data:
     if (!imageData) return res.status(400).json({ error: "Нет данных" });
-    if (!TG_BOT_TOKEN || !ADMIN_TG_ID) return res.json({ ok: true }); // TG не настроен
+    if (!TG_BOT_TOKEN || !ADMIN_TG_IDS.length) return res.json({ ok: true }); // TG не настроен
 
     // Конвертируем base64 → Buffer
     const buf = Buffer.from(imageData, "base64");
-
-    // Отправляем в Telegram через multipart/form-data
-    const boundary = "----WidgetBoundary" + Date.now();
     const caption = `📱 ${req.user.username} | ${new Date().toLocaleTimeString("ru")}`;
 
-    const parts = [
-      `--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${ADMIN_TG_ID}`,
-      `--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${caption}`,
-      `--${boundary}\r\nContent-Disposition: form-data; name="photo"; filename="screen.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`,
-    ];
-
-    const header = Buffer.from(parts.join("\r\n"));
-    const footer = Buffer.from(`\r\n--${boundary}--`);
-    const body = Buffer.concat([header, buf, footer]);
-
-    await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendPhoto`, {
-      method: "POST",
-      headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` },
-      body,
-    });
+    // Отправляем всем admin-ам
+    await Promise.all(ADMIN_TG_IDS.map(adminId => {
+      const boundary = "----WidgetBoundary" + Date.now() + adminId;
+      const parts = [
+        `--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${adminId}`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${caption}`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="photo"; filename="screen.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`,
+      ];
+      const header = Buffer.from(parts.join("\r\n"));
+      const footer = Buffer.from(`\r\n--${boundary}--`);
+      const body = Buffer.concat([header, buf, footer]);
+      return fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendPhoto`, {
+        method: "POST",
+        headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` },
+        body,
+      });
+    }));
 
     res.json({ ok: true });
   } catch (e) {
@@ -456,14 +457,13 @@ async function tgRequest(method, params = {}) {
 }
 
 async function tgSendToAdmin(text, options = {}) {
-  if (!TG_BOT_TOKEN || !ADMIN_TG_ID) return null;
-  const res = await tgRequest("sendMessage", {
-    chat_id: ADMIN_TG_ID,
-    text,
-    parse_mode: "HTML",
-    ...options,
-  });
-  return res?.result;
+  if (!TG_BOT_TOKEN || !ADMIN_TG_IDS.length) return null;
+  const results = await Promise.all(
+    ADMIN_TG_IDS.map(id => tgRequest("sendMessage", {
+      chat_id: id, text, parse_mode: "HTML", ...options,
+    }))
+  );
+  return results[0]?.result; // возвращаем результат первого (для reply tracking)
 }
 
 async function sendAdminReplyToUser(targetUserId, content) {
@@ -505,8 +505,8 @@ async function processTgUpdates() {
       const msg = update.message;
       if (!msg) continue;
 
-      // Только от admin-а
-      if (msg.from?.id?.toString() !== ADMIN_TG_ID.toString()) continue;
+      // Только от admin-ов
+      if (!ADMIN_TG_IDS.includes(msg.from?.id?.toString())) continue;
 
       const text = (msg.text || "").trim();
 
@@ -772,7 +772,7 @@ wss.on("connection", (ws) => {
           });
 
           // Уведомление в Telegram
-          if (TG_BOT_TOKEN && ADMIN_TG_ID) {
+          if (TG_BOT_TOKEN && ADMIN_TG_IDS.length) {
             tgSendToAdmin(
               `🟢 <b>${user.username}</b> вошёл в чат\n` +
               `<i>Ответьте на его сообщение или используйте /reply ${userId} текст</i>`
@@ -836,7 +836,7 @@ wss.on("connection", (ws) => {
       });
 
       // Пересылаем admin-у в Telegram
-      if (TG_BOT_TOKEN && ADMIN_TG_ID) {
+      if (TG_BOT_TOKEN && ADMIN_TG_IDS.length) {
         const sent = await tgSendToAdmin(
           `💬 <b>${authedUser.username}</b>:\n${msg.content}\n\n<i>ID: ${userId}</i>`,
           { reply_markup: { force_reply: true } }
