@@ -160,6 +160,24 @@ tbody td{padding:11px 14px;font-size:13px}
 .radio-btn:hover{border-color:var(--purple);color:var(--purple)}
 .radio-btn.selected{border-color:var(--purple);background:rgba(102,126,234,.08);color:var(--purple)}
 
+/* ── Screen View ── */
+#screen-overlay{position:fixed;inset:0;background:#111;z-index:500;display:flex;flex-direction:column;opacity:0;pointer-events:none;transition:opacity .2s}
+#screen-overlay.open{opacity:1;pointer-events:all}
+.sov-header{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#1a1a2e;border-bottom:1px solid #333;flex-shrink:0}
+.sov-live{display:flex;align-items:center;gap:6px;font-size:12px;color:#ff4757;font-weight:700}
+.sov-live-dot{width:8px;height:8px;border-radius:50%;background:#ff4757;animation:livePulse 1s infinite}
+@keyframes livePulse{0%,100%{opacity:1}50%{opacity:.3}}
+.sov-title{color:#fff;font-size:14px;font-weight:600;flex:1}
+.sov-user{color:rgba(255,255,255,.55);font-size:12px}
+.sov-close{background:rgba(255,255,255,.1);border:none;color:#fff;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:20px;display:flex;align-items:center;justify-content:center;transition:background .15s;flex-shrink:0}
+.sov-close:hover{background:rgba(255,255,255,.25)}
+#screen-container{flex:1;overflow:hidden;display:flex;align-items:flex-start;justify-content:center;background:#1a1a1a;padding:0}
+#screen-container .replayer-wrapper{transform-origin:top center!important}
+.sov-waiting{color:#555;font-size:14px;text-align:center;margin:auto}
+.btn-screen{background:#e3f2fd;color:#1565c0;padding:5px 10px;border-radius:8px;font-size:11px;font-weight:600;border:none;cursor:pointer;transition:opacity .15s;white-space:nowrap}
+.btn-screen:hover{opacity:.8}
+.btn-screen.active{background:#fce4ec;color:#c62828}
+
 /* ── Toast ── */
 .toast{position:fixed;top:20px;right:20px;background:var(--card);border-radius:16px;padding:12px 16px;box-shadow:0 8px 30px rgba(0,0,0,.15);display:flex;align-items:center;gap:10px;z-index:9999;transform:translateY(-90px);opacity:0;transition:transform .3s cubic-bezier(.34,1.56,.64,1),opacity .3s;min-width:280px;max-width:360px;border-left:4px solid var(--purple)}
 .toast.show{transform:translateY(0);opacity:1}
@@ -373,6 +391,7 @@ tbody td{padding:11px 14px;font-size:13px}
             <div class="chat-header-status" id="chat-status">offline</div>
           </div>
           <div class="chat-header-time" id="chat-time-left"></div>
+          <button class="btn-screen" id="screen-btn" style="display:none" onclick="openScreenView()">👁 Экран</button>
         </div>
         <div class="chat-messages" id="chat-messages">
           <div class="chat-empty">
@@ -416,6 +435,19 @@ tbody td{padding:11px 14px;font-size:13px}
       <button class="btn-cancel" id="modal-cancel">Отмена</button>
       <button class="btn btn-primary" id="modal-create" style="flex:1">Создать</button>
     </div>
+  </div>
+</div>
+
+<!-- ── Screen View Overlay ── -->
+<div id="screen-overlay">
+  <div class="sov-header">
+    <div class="sov-live"><span class="sov-live-dot"></span>LIVE</div>
+    <div class="sov-title">Экран пользователя</div>
+    <span class="sov-user" id="sov-username"></span>
+    <button class="sov-close" onclick="closeScreenView()">×</button>
+  </div>
+  <div id="screen-container">
+    <div class="sov-waiting" id="sov-waiting">Ожидание данных экрана...</div>
   </div>
 </div>
 
@@ -613,6 +645,7 @@ async function openChat(user) {
   $('chat-time-left').textContent = user.accessMinutes ? `⏱ ${fmt(user.remainingSeconds)}` : '';
   $('users-view').style.display = 'none';
   $('chat-view').classList.add('visible');
+  updateScreenBtn();
   try {
     const history = chats[user.id] || await api('GET',`/api/admin/chat/${user.id}`);
     chats[user.id] = history;
@@ -652,6 +685,7 @@ $('back-btn').addEventListener('click', () => {
   selectedUser = null;
   $('chat-view').classList.remove('visible');
   $('users-view').style.display = '';
+  $('screen-btn').style.display = 'none';
   renderSidebar();
 });
 
@@ -740,11 +774,30 @@ function connectWS() {
       onlineUsers.add(msg.userId);
       const u = users.find(u=>u.id===msg.userId);
       if (u) { showToast('🟢',`${msg.username} онлайн`,u.accessType==='chat'?'Ожидает оператора':'Начал сессию'); renderSidebar(); renderTable(); updateStats(); }
+      if (selectedUser?.id===msg.userId) updateScreenBtn();
     }
     if (msg.type==='user_offline') {
       onlineUsers.delete(msg.userId);
+      screeningUsers.delete(msg.userId);
       renderSidebar(); renderTable(); updateStats();
-      if (selectedUser?.id===msg.userId) { $('chat-status').textContent='○ Офлайн'; $('chat-status').style.color='var(--muted)'; }
+      if (selectedUser?.id===msg.userId) { $('chat-status').textContent='○ Офлайн'; $('chat-status').style.color='var(--muted)'; updateScreenBtn(); }
+      if (currentScreenUserId===msg.userId) closeScreenView();
+    }
+    if (msg.type==='screen_share_start') {
+      screeningUsers.add(msg.userId);
+      const u = users.find(u=>u.id===msg.userId);
+      showToast('📱',`${msg.username} показывает экран`,'Нажмите «👁 Экран» чтобы посмотреть');
+      if (selectedUser?.id===msg.userId) updateScreenBtn();
+    }
+    if (msg.type==='screen_share_stop') {
+      screeningUsers.delete(msg.userId);
+      if (selectedUser?.id===msg.userId) updateScreenBtn();
+      if (currentScreenUserId===msg.userId) closeScreenView();
+    }
+    if (msg.type==='screen_events') {
+      if (msg.userId===currentScreenUserId && replayer) {
+        try { msg.events.forEach(ev => replayer.addEvent(ev)); scaleReplayer(); } catch {}
+      }
     }
     if (msg.type==='new_message') {
       if (!chats[msg.userId]) chats[msg.userId]=[];
@@ -759,6 +812,87 @@ function connectWS() {
     }
   };
   ws.onclose = () => setTimeout(()=>{ if(token) connectWS(); }, 3000);
+}
+
+// ── Screen View ────────────────────────────────────────────────────────────
+let replayer = null, currentScreenUserId = null, rrwebLoaded = false;
+const screeningUsers = new Set(); // userId кто сейчас шарит экран
+
+async function loadRrweb() {
+  if (rrwebLoaded) return;
+  await new Promise(r => {
+    if (window.rrweb) { rrwebLoaded = true; r(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/rrweb@1.1.3/dist/rrweb.min.js';
+    s.onload = () => { rrwebLoaded = true; r(); };
+    s.onerror = r;
+    document.head.appendChild(s);
+  });
+}
+
+async function openScreenView() {
+  if (!selectedUser) return;
+  await loadRrweb();
+  if (!window.rrweb) { alert('Не удалось загрузить rrweb'); return; }
+
+  const container = $('screen-container');
+  $('sov-waiting').style.display = 'none';
+  $('sov-username').textContent = selectedUser.username;
+
+  if (currentScreenUserId !== selectedUser.id || !replayer) {
+    container.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'width:100%;height:100%;';
+    container.appendChild(wrap);
+
+    replayer = new rrweb.Replayer([], {
+      liveMode: true,
+      root: wrap,
+      mouseTail: { duration: 500, lineCap: 'round', lineWidth: 3 },
+      UNSAFE_replayCanvas: false,
+    });
+    replayer.startLive();
+    currentScreenUserId = selectedUser.id;
+
+    // Масштабирование iframe под контейнер
+    setTimeout(() => scaleReplayer(), 300);
+  }
+
+  $('screen-overlay').classList.add('open');
+}
+
+function scaleReplayer() {
+  const iframe = $('screen-container').querySelector('iframe');
+  if (!iframe) return;
+  const container = $('screen-container');
+  const iW = iframe.offsetWidth || 1280;
+  const iH = iframe.offsetHeight || 720;
+  const cW = container.clientWidth;
+  const cH = container.clientHeight;
+  const scale = Math.min(cW / iW, cH / iH, 1);
+  const wrap = $('screen-container').querySelector('.replayer-wrapper');
+  if (wrap) wrap.style.transform = `scale(${scale})`;
+}
+
+function closeScreenView() {
+  $('screen-overlay').classList.remove('open');
+}
+
+window.addEventListener('resize', scaleReplayer);
+
+function updateScreenBtn() {
+  const btn = $('screen-btn');
+  if (!btn) return;
+  const isOnline = selectedUser && onlineUsers.has(selectedUser.id);
+  const isSharing = selectedUser && screeningUsers.has(selectedUser.id);
+  btn.style.display = isOnline && selectedUser?.accessType === 'chat' ? '' : 'none';
+  if (isSharing) {
+    btn.classList.add('active');
+    btn.textContent = '🔴 Экран (LIVE)';
+  } else {
+    btn.classList.remove('active');
+    btn.textContent = '👁 Экран';
+  }
 }
 
 // ── Auto-login ─────────────────────────────────────────────────────────────

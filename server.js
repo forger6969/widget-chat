@@ -820,6 +820,26 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    // ── Пользователь начал трансляцию экрана ──
+    if (msg.type === "screen_share_start" && authedUser.role !== "admin") {
+      notifyAdmin({ type: "screen_share_start", userId, username: authedUser.username });
+      return;
+    }
+
+    // ── Пользователь остановил трансляцию ──
+    if (msg.type === "screen_share_stop" && authedUser.role !== "admin") {
+      notifyAdmin({ type: "screen_share_stop", userId });
+      return;
+    }
+
+    // ── События экрана → admin ──
+    if (msg.type === "screen_events" && authedUser.role !== "admin") {
+      if (adminSocket && adminSocket.readyState === WebSocket.OPEN) {
+        adminSocket.send(JSON.stringify({ type: "screen_events", userId, events: msg.events }));
+      }
+      return;
+    }
+
     // ── Ответ admin → пользователю ──
     if (msg.type === "admin_msg" && authedUser.role === "admin") {
       const { to: targetUserId, content } = msg;

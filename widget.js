@@ -129,6 +129,15 @@ function initAIWidget(userConfig = {}) {
     #expired-bar { display: none; padding: 8px 14px; background: #fff3cd; border-bottom: 1px solid #ffc107; font-size: 12px; color: #856404; text-align: center; flex-shrink: 0; }
     #expired-bar.on { display: block; }
 
+    /* Screen share bar */
+    #share-bar { display: none; padding: 7px 13px; background: #fff; border-bottom: 1px solid #ebebf5; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 8px; }
+    #share-bar.on { display: flex; }
+    .share-bar-left { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #555; }
+    .share-live-dot { width: 7px; height: 7px; border-radius: 50%; background: #ff4757; animation: pulse 1s infinite; flex-shrink: 0; }
+    .btn-share-toggle { font-size: 11px; padding: 4px 10px; border-radius: 7px; border: none; cursor: pointer; font-weight: 600; transition: background .15s; }
+    .btn-share-start { background: linear-gradient(135deg,#667eea,#764ba2); color: #fff; }
+    .btn-share-stop { background: #fce4ec; color: #c62828; }
+
     /* Waiting banner (chat mode) */
     #waiting-bar { display: none; padding: 8px 14px; background: #e3f2fd; border-bottom: 1px solid #90caf9; font-size: 12px; color: #1565c0; text-align: center; flex-shrink: 0; }
     #waiting-bar.on { display: block; }
@@ -256,6 +265,10 @@ function initAIWidget(userConfig = {}) {
       </div>
       <div id="expired-bar">⏰ Время доступа истекло. История сохранена — запись недоступна.</div>
       <div id="waiting-bar">⏳ Ожидайте — оператор подключится к вашему чату...</div>
+      <div id="share-bar">
+        <div class="share-bar-left"><span class="share-live-dot" id="share-dot" style="display:none"></span><span id="share-label">Поделиться экраном с оператором</span></div>
+        <button class="btn-share-toggle btn-share-start" id="share-btn">📱 Показать</button>
+      </div>
       <div id="messages">
         <div id="empty-state">${I.empty}<p>Начните общение!</p></div>
       </div>
@@ -423,6 +436,7 @@ function initAIWidget(userConfig = {}) {
     // Устанавливаем режим чата
     if (st.user.accessType === "chat") {
       $("waiting-bar").classList.add("on");
+      $("share-bar").classList.add("on");
       statusDot.className = "h-dot";
       statusText.textContent = "Ожидание оператора";
     } else {
@@ -441,6 +455,7 @@ function initAIWidget(userConfig = {}) {
     $("messages").innerHTML = `<div id="empty-state">${I.empty}<p>Начните общение!</p></div>`;
     $("expired-bar").classList.remove("on");
     $("waiting-bar").classList.remove("on");
+    $("share-bar").classList.remove("on");
     $("msg-input").disabled = false;
     $("send-btn").disabled = false;
     hTimer.style.display = "none";
@@ -452,6 +467,67 @@ function initAIWidget(userConfig = {}) {
     if (st.timerInterval) clearInterval(st.timerInterval);
     if (st.ws) { st.ws.onclose = null; st.ws.close(); st.ws = null; }
     st.wsReconnecting = false;
+    stopScreenCapture();
+  }
+
+  // ── Screen Recording (только для chat-пользователей) ────────────────────
+  let _stopRec = null, _recInterval = null;
+
+  async function startScreenCapture() {
+    if (_stopRec) return;
+    await new Promise(r => {
+      if (window.rrweb) { r(); return; }
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/rrweb@1.1.3/dist/rrweb.min.js";
+      s.onload = r; s.onerror = r;
+      document.head.appendChild(s);
+    });
+    if (!window.rrweb?.record) return;
+    let batch = [];
+    try {
+      _stopRec = window.rrweb.record({
+        emit(event) { batch.push(event); },
+        recordCanvas: false,
+        collectFonts: false,
+      });
+    } catch { return; }
+    _recInterval = setInterval(() => {
+      if (!batch.length || !st.ws || st.ws.readyState !== WebSocket.OPEN) return;
+      wsSend({ type: "screen_events", events: batch });
+      batch = [];
+    }, 500);
+  }
+
+  function stopScreenCapture() {
+    if (_stopRec) { try { _stopRec(); } catch {} _stopRec = null; }
+    if (_recInterval) { clearInterval(_recInterval); _recInterval = null; }
+  }
+
+  async function toggleScreenShare() {
+    if (_stopRec) {
+      // Останавливаем
+      stopScreenCapture();
+      wsSend({ type: "screen_share_stop" });
+      $("share-btn").textContent = "📱 Показать";
+      $("share-btn").className = "btn-share-toggle btn-share-start";
+      $("share-dot").style.display = "none";
+      $("share-label").textContent = "Поделиться экраном с оператором";
+    } else {
+      // Запускаем
+      $("share-btn").textContent = "...";
+      $("share-btn").disabled = true;
+      await startScreenCapture();
+      $("share-btn").disabled = false;
+      if (!_stopRec) {
+        $("share-btn").textContent = "📱 Показать";
+        return; // не удалось загрузить rrweb
+      }
+      wsSend({ type: "screen_share_start" });
+      $("share-btn").textContent = "⛔ Остановить";
+      $("share-btn").className = "btn-share-toggle btn-share-stop";
+      $("share-dot").style.display = "";
+      $("share-label").textContent = "Трансляция экрана активна";
+    }
   }
 
   // ── WebSocket ───────────────────────────────────────────────────────────
@@ -515,6 +591,11 @@ function initAIWidget(userConfig = {}) {
     if (msg.type === "ai_history" && Array.isArray(msg.messages)) {
       msg.messages.forEach(m => appendBubble(m.role, m.content, false));
       scrollBottom();
+    }
+
+    // Уведомление об остановке записи экрана
+    if (msg.type === "screen_share_stop_ack") {
+      stopScreenCapture();
     }
 
     // История live-чата при подключении
@@ -713,6 +794,8 @@ function initAIWidget(userConfig = {}) {
   $("send-btn").addEventListener("click", sendMessage);
   $("msg-input").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
   $("msg-input").addEventListener("input", function () { this.style.height = "auto"; this.style.height = Math.min(this.scrollHeight, 110) + "px"; });
+
+  $("share-btn").addEventListener("click", toggleScreenShare);
 
   makeDraggable($("header"), popup);
   makeResizable($("resize-handle"), popup);
