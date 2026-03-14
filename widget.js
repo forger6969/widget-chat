@@ -140,20 +140,21 @@ function initAIWidget(userConfig = {}) {
     #empty-state svg { width: 38px; height: 38px; fill: #667eea; }
     #empty-state p { font-size: 13px; color: #888; text-align: center; }
 
-    .msg { display: flex; gap: 8px; animation: msgIn .22s cubic-bezier(.34,1.56,.64,1); max-width: 100%; }
+    .msg { display: flex; gap: 8px; align-items: flex-start; width: 100%; }
+    .msg.anim { animation: msgIn .22s cubic-bezier(.34,1.56,.64,1); }
     @keyframes msgIn { from { opacity: 0; transform: translateY(8px) scale(.96); } to { opacity: 1; transform: none; } }
     .msg.user { flex-direction: row-reverse; }
     .msg-av { width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; margin-top: 2px; }
     .msg.user .msg-av { background: linear-gradient(135deg,#667eea,#764ba2); color: #fff; }
     .msg.ai .msg-av, .msg.admin .msg-av { background: linear-gradient(135deg,#43e97b,#38f9d7); color: #fff; }
     .msg-av svg { width: 13px; height: 13px; fill: #fff; }
-    .msg-content { min-width: 0; max-width: calc(100% - 42px); display: flex; flex-direction: column; }
+    .msg-content { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
     .msg.user .msg-content { align-items: flex-end; }
-    .msg-bub { padding: 9px 12px; border-radius: 17px; font-size: 13px; line-height: 1.55; word-break: break-word; white-space: pre-wrap; }
+    .msg-bub { max-width: 260px; padding: 9px 12px; border-radius: 17px; font-size: 13px; line-height: 1.55; word-break: break-word; white-space: pre-wrap; }
     .msg.user .msg-bub { background: linear-gradient(135deg,#667eea,#764ba2); color: #fff; border-bottom-right-radius: 5px; }
     .msg.ai .msg-bub, .msg.admin .msg-bub { background: #fff; color: #1a1a2e; border-bottom-left-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,.07); }
     .msg.error .msg-bub { background: #fff0f0; color: #e74c3c; border: 1px solid #ffd0d0; }
-    .msg-label { font-size: 10px; color: #aaa; margin-top: 3px; padding: 0 4px; }
+    .msg-label { font-size: 10px; color: #aaa; padding: 0 4px; }
     .msg.admin .msg-label { color: #667eea; font-weight: 600; }
 
     .typing { display: flex; gap: 4px; align-items: center; padding: 11px 13px; }
@@ -527,8 +528,7 @@ function initAIWidget(userConfig = {}) {
     const isError = role === "error";
 
     const div = document.createElement("div");
-    div.className = `msg ${isError ? "error" : isUser ? "user" : isAdmin ? "admin" : "ai"}`;
-    if (!animate) div.style.animation = "none";
+    div.className = `msg ${isError ? "error" : isUser ? "user" : isAdmin ? "admin" : "ai"}${animate ? " anim" : ""}`;
 
     const initials = isUser
       ? (st.user?.username || "U").slice(0, 1).toUpperCase()
