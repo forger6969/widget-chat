@@ -173,6 +173,19 @@ function initAIWidget(userConfig = {}) {
     #send-btn:disabled { opacity: .35; cursor: not-allowed; }
     #send-btn svg { width: 17px; height: 17px; fill: #fff; }
 
+    /* ── Resize handle ── */
+    #resize-handle {
+      position: absolute; bottom: 0; right: 0;
+      width: 22px; height: 22px;
+      cursor: nwse-resize;
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity .2s; z-index: 10;
+      border-radius: 0 0 18px 0;
+    }
+    #popup:hover #resize-handle { opacity: 0.35; }
+    #resize-handle:hover { opacity: 1 !important; }
+    #resize-handle svg { width: 12px; height: 12px; fill: #999; pointer-events: none; }
+
     @media (max-width: 480px) {
       #popup { width: calc(100vw - 16px) !important; height: 72vh !important; border-radius: 18px 18px 0 0 !important; }
     }
@@ -250,6 +263,9 @@ function initAIWidget(userConfig = {}) {
         <textarea id="msg-input" placeholder="Напишите сообщение…" rows="1"></textarea>
         <button id="send-btn">${I.send}</button>
       </div>
+    </div>
+    <div id="resize-handle" title="Перетяни влево/вправо для изменения размера">
+      <svg viewBox="0 0 12 12"><path d="M10 2L2 10M6 2L2 6M10 6L6 10" stroke="#999" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>
     </div>
   `;
   shadow.appendChild(popup);
@@ -606,6 +622,52 @@ function initAIWidget(userConfig = {}) {
     }
   }
 
+  // ── Resizable (равномерный zoom) ────────────────────────────────────────
+  const BASE_W = 360, BASE_H = 520;
+  const MIN_ZOOM = 0.6, MAX_ZOOM = 1.55;
+  let currentZoom = parseFloat(localStorage.getItem("aw_zoom") || "1");
+
+  function applyZoom(z) {
+    currentZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+    // zoom масштабирует всё содержимое равномерно (текст, отступы, иконки)
+    popup.style.zoom = currentZoom;
+    localStorage.setItem("aw_zoom", currentZoom.toFixed(3));
+  }
+
+  function makeResizable(handle, target) {
+    let active = false, startX, startZoom;
+
+    function onStart(e) {
+      e.preventDefault(); e.stopPropagation();
+      active = true;
+      startX = e.touches ? e.touches[0].clientX : e.clientX;
+      startZoom = currentZoom;
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onEnd);
+      document.addEventListener("touchmove", onMove, { passive: false });
+      document.addEventListener("touchend", onEnd);
+    }
+
+    function onMove(e) {
+      if (!active) return;
+      const cx = e.touches ? e.touches[0].clientX : e.clientX;
+      const dx = cx - startX;
+      // 300px перетаскивания = полный диапазон масштаба
+      applyZoom(startZoom + dx / 300);
+    }
+
+    function onEnd() {
+      active = false;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onEnd);
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onEnd);
+    }
+
+    handle.addEventListener("mousedown", onStart);
+    handle.addEventListener("touchstart", onStart, { passive: false });
+  }
+
   // ── Draggable ───────────────────────────────────────────────────────────
   function makeDraggable(handle, target) {
     let dragging = false, startX, startY, startL, startT;
@@ -653,6 +715,8 @@ function initAIWidget(userConfig = {}) {
   $("msg-input").addEventListener("input", function () { this.style.height = "auto"; this.style.height = Math.min(this.scrollHeight, 110) + "px"; });
 
   makeDraggable($("header"), popup);
+  makeResizable($("resize-handle"), popup);
+  applyZoom(currentZoom); // восстанавливаем сохранённый zoom
 
   // ── Авто-логин при наличии токена ───────────────────────────────────────
   if (st.token) {
