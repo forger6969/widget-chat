@@ -1,0 +1,7 @@
+# Секреты — никогда не коммитить!
+.env
+.env.local
+.env.*.local
+
+# Node
+node_modules/

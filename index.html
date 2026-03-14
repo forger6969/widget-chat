@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Widget — демо</title>
+  <style>
+    /* Демо-страница */
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #f5f7ff 0%, #fff0f8 100%);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+      color: #1a1a2e;
+    }
+
+    .demo-card {
+      background: #fff;
+      border-radius: 24px;
+      padding: 40px 36px;
+      max-width: 640px;
+      width: 100%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.1);
+    }
+
+    .demo-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: linear-gradient(135deg, #667eea22, #764ba222);
+      color: #667eea;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 20px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      font-size: 32px;
+      font-weight: 800;
+      margin-bottom: 12px;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    p {
+      color: #666;
+      line-height: 1.7;
+      margin-bottom: 16px;
+    }
+
+    .code-block {
+      background: #1a1a2e;
+      border-radius: 14px;
+      padding: 20px 22px;
+      margin: 20px 0;
+      position: relative;
+      overflow: hidden;
+    }
+    .code-block pre {
+      margin: 0;
+      color: #e0e0ff;
+      font-family: 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .code-block .comment { color: #6272a4; }
+    .code-block .keyword { color: #ff79c6; }
+    .code-block .string  { color: #f1fa8c; }
+    .code-block .prop    { color: #50fa7b; }
+
+    .copy-btn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: rgba(255,255,255,0.1);
+      border: none;
+      border-radius: 8px;
+      color: #aaa;
+      font-size: 11px;
+      padding: 4px 10px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .copy-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 24px 0;
+    }
+    .feature-item {
+      background: #f7f8fc;
+      border-radius: 14px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .feature-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 16px;
+    }
+    .feature-text { font-size: 13px; color: #555; line-height: 1.4; }
+    .feature-text strong { display: block; color: #1a1a2e; font-size: 13.5px; margin-bottom: 2px; }
+
+    .steps {
+      counter-reset: step;
+      padding: 0;
+      list-style: none;
+      margin: 16px 0;
+    }
+    .steps li {
+      counter-increment: step;
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 14px;
+      font-size: 14px;
+      color: #444;
+      line-height: 1.5;
+    }
+    .steps li::before {
+      content: counter(step);
+      min-width: 26px;
+      height: 26px;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: #fff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .steps li a { color: #667eea; font-weight: 600; }
+
+    footer {
+      margin-top: 32px;
+      font-size: 12px;
+      color: #aaa;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="demo-card">
+    <div class="demo-badge">✦ Демо-страница</div>
+    <h1>AI Chat Widget</h1>
+    <p>
+      Встраиваемый AI-чат-виджет для любого сайта.
+      Подключается <strong>одной строкой</strong>, работает через
+      <a href="https://console.groq.com" style="color:#667eea;font-weight:600;">Groq API</a>
+      (бесплатный тир). Посмотрите на кнопку в углу экрана →
+    </p>
+
+    <div class="feature-grid">
+      <div class="feature-item">
+        <div class="feature-icon">💬</div>
+        <div class="feature-text">
+          <strong>AI-чат</strong>Llama 3.1 через Groq API (бесплатно)
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">🔒</div>
+        <div class="feature-text">
+          <strong>Авторизация</strong>Логин + история в localStorage
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">🖱️</div>
+        <div class="feature-text">
+          <strong>Drag & Drop</strong>Перетаскивайте окно куда угодно
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">🛡️</div>
+        <div class="feature-text">
+          <strong>Shadow DOM</strong>Нет конфликтов со стилями сайта
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">📱</div>
+        <div class="feature-text">
+          <strong>Мобильный</strong>Адаптивный дизайн
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">⚡</div>
+        <div class="feature-text">
+          <strong>Одна строка</strong>Подключение через import()
+        </div>
+      </div>
+    </div>
+
+    <h2 style="font-size:18px;margin:24px 0 12px;">Подключение</h2>
+
+    <div class="code-block">
+      <button class="copy-btn" onclick="copyCode(this)">Копировать</button>
+      <pre><span class="comment">// Вариант 1 — динамический импорт (рекомендуется)</span>
+<span class="keyword">window</span>.<span class="prop">AIWidgetConfig</span> = {
+  <span class="prop">apiKey</span>: <span class="string">"gsk_ВАШ_GROQ_КЛЮЧ"</span>,
+  <span class="prop">title</span>: <span class="string">"Поддержка"</span>,
+  <span class="prop">systemPrompt</span>: <span class="string">"Ты ассистент интернет-магазина."</span>,
+  <span class="prop">position</span>: <span class="string">"bottom-right"</span>,  <span class="comment">// или "bottom-left"</span>
+};
+<span class="keyword">import</span>(<span class="string">"https://your-domain.com/widget.js"</span>);
+
+<span class="comment">// Вариант 2 — тег &lt;script&gt;</span>
+<span class="comment">// &lt;script&gt;window.AIWidgetConfig = { apiKey: "..." };&lt;/script&gt;</span>
+<span class="comment">// &lt;script src="https://your-domain.com/widget.js"&gt;&lt;/script&gt;</span></pre>
+    </div>
+
+    <h2 style="font-size:18px;margin:24px 0 12px;">Как начать</h2>
+    <ol class="steps">
+      <li>
+        Зайдите на <a href="https://console.groq.com" target="_blank">console.groq.com</a>
+        и создайте бесплатный API ключ.
+      </li>
+      <li>
+        Скопируйте <code>widget.js</code> на ваш сервер (или используйте CDN).
+      </li>
+      <li>
+        Добавьте две строки на любую страницу (конфиг + скрипт).
+      </li>
+      <li>
+        Готово! Кнопка чата появится в нижнем углу экрана.
+      </li>
+    </ol>
+
+    <h2 style="font-size:18px;margin:24px 0 12px;">Публичный API</h2>
+    <div class="code-block">
+      <pre><span class="comment">// Доступен после загрузки виджета</span>
+<span class="keyword">window</span>.<span class="prop">AIWidget</span>.<span class="prop">open</span>();          <span class="comment">// Открыть</span>
+<span class="keyword">window</span>.<span class="prop">AIWidget</span>.<span class="prop">close</span>();         <span class="comment">// Закрыть</span>
+<span class="keyword">window</span>.<span class="prop">AIWidget</span>.<span class="prop">logout</span>();        <span class="comment">// Выйти</span>
+<span class="keyword">window</span>.<span class="prop">AIWidget</span>.<span class="prop">getUser</span>();       <span class="comment">// Текущий юзер</span>
+<span class="keyword">window</span>.<span class="prop">AIWidget</span>.<span class="prop">setConfig</span>({     <span class="comment">// Обновить настройки</span>
+  <span class="prop">apiKey</span>: <span class="string">"новый_ключ"</span>
+});</pre>
+    </div>
+  </div>
+
+  <footer>
+    AI Chat Widget · Shadow DOM · Groq API · Без зависимостей
+  </footer>
+
+  <!-- ──────────────────────────────────────────────────────────────────
+       ПОДКЛЮЧЕНИЕ ВИДЖЕТА
+       Замените apiKey на ваш реальный ключ с console.groq.com
+  ────────────────────────────────────────────────────────────────── -->
+  <script type="module">
+    // Вариант 1: ES module import (рекомендуется)
+    import init from "./widget.js";
+    init({
+      serverUrl: window.location.origin, // URL вашего сервера
+      title: "AI Assistant",
+      position: "bottom-right",
+    });
+  </script>
+
+  <script>
+    // Кнопка копирования кода
+    function copyCode(btn) {
+      const pre = btn.closest('.code-block').querySelector('pre');
+      const text = pre.innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = "Скопировано ✓";
+        setTimeout(() => btn.textContent = "Копировать", 2000);
+      });
+    }
+  </script>
+</body>
+</html>
