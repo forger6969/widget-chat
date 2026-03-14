@@ -16,13 +16,15 @@ const path = require("path");
 const cors = require("cors");
 
 // ── Конфиг ───────────────────────────────────────────────────────────────
-const PORT           = process.env.PORT           || 4500;
-const MONGODB_URI    = process.env.MONGODB_URI    || "mongodb://localhost:27017/widget-ai";
-const JWT_SECRET     = process.env.JWT_SECRET     || "dev_secret";
-const GROQ_API_KEY   = process.env.GROQ_API_KEY   || "";
-const GROQ_MODEL     = process.env.GROQ_MODEL     || "llama-3.1-8b-instant";
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
+const PORT            = process.env.PORT            || 4500;
+const MONGODB_URI     = process.env.MONGODB_URI     || "mongodb://localhost:27017/widget-ai";
+const JWT_SECRET      = process.env.JWT_SECRET      || "dev_secret";
+const GROQ_API_KEY    = process.env.GROQ_API_KEY    || "";
+const GROQ_MODEL      = process.env.GROQ_MODEL      || "llama-3.1-8b-instant";
+const ADMIN_USERNAME  = process.env.ADMIN_USERNAME  || "admin";
+const ADMIN_PASSWORD  = process.env.ADMIN_PASSWORD  || "admin123";
+const TG_BOT_TOKEN    = process.env.TG_BOT_TOKEN    || "";
+const ADMIN_TG_ID     = process.env.ADMIN_TELEGRAM_ID || "";
 
 // ── MongoDB ──────────────────────────────────────────────────────────────
 let db;
@@ -392,6 +394,184 @@ app.get("/api/ai/history", requireAuth, async (req, res) => {
   res.json(messages);
 });
 
+// ── Telegram Bot ──────────────────────────────────────────────────────────
+
+// tg message_id → userId (для reply-to tracking)
+const tgMsgToUser = new Map();
+let tgOffset = 0;
+
+async function tgRequest(method, params = {}) {
+  if (!TG_BOT_TOKEN) return null;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/${method}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  } catch (e) {
+    console.error("TG request error:", e.message);
+    return null;
+  }
+}
+
+async function tgSendToAdmin(text, options = {}) {
+  if (!TG_BOT_TOKEN || !ADMIN_TG_ID) return null;
+  const res = await tgRequest("sendMessage", {
+    chat_id: ADMIN_TG_ID,
+    text,
+    parse_mode: "HTML",
+    ...options,
+  });
+  return res?.result;
+}
+
+async function sendAdminReplyToUser(targetUserId, content) {
+  const message = {
+    userId: targetUserId,
+    fromAdmin: true,
+    content,
+    createdAt: new Date(),
+  };
+  await db.collection("live_messages").insertOne(message);
+
+  // WebSocket если онлайн
+  const targetWs = userSockets.get(targetUserId);
+  if (targetWs) {
+    wsSend(targetWs, { type: "admin_reply", content, createdAt: message.createdAt });
+  }
+
+  // Уведомить admin-панель
+  wsSend(adminSocket, {
+    type: "admin_msg_sent",
+    to: targetUserId,
+    content,
+    createdAt: message.createdAt,
+  });
+}
+
+async function processTgUpdates() {
+  if (!TG_BOT_TOKEN) return;
+  try {
+    const data = await tgRequest("getUpdates", {
+      offset: tgOffset,
+      timeout: 25,
+      allowed_updates: ["message"],
+    });
+    if (!data?.ok || !data.result?.length) return;
+
+    for (const update of data.result) {
+      tgOffset = update.update_id + 1;
+      const msg = update.message;
+      if (!msg) continue;
+
+      // Только от admin-а
+      if (msg.from?.id?.toString() !== ADMIN_TG_ID.toString()) continue;
+
+      const text = (msg.text || "").trim();
+
+      // /create username password minutes ai|chat
+      if (text.startsWith("/create ")) {
+        const parts = text.slice(8).trim().split(/\s+/);
+        if (parts.length < 4) {
+          await tgSendToAdmin("❌ Использование:\n<code>/create username password minutes ai|chat</code>");
+          continue;
+        }
+        const [username, password, minutes, accessType] = parts;
+        if (!["ai", "chat"].includes(accessType)) {
+          await tgSendToAdmin("❌ accessType должен быть <b>ai</b> или <b>chat</b>");
+          continue;
+        }
+        const mins = parseInt(minutes);
+        if (isNaN(mins) || mins <= 0) {
+          await tgSendToAdmin("❌ Неверное время (минуты > 0)");
+          continue;
+        }
+        try {
+          const hash = await bcrypt.hash(password, 10);
+          await db.collection("users").insertOne({
+            username, passwordHash: hash, role: "user",
+            accessType, accessMinutes: mins, usedSeconds: 0,
+            sessionStart: null, createdAt: new Date(),
+          });
+          await tgSendToAdmin(
+            `✅ Пользователь создан:\n👤 Логин: <code>${username}</code>\n🔑 Пароль: <code>${password}</code>\n🔰 Тип: <b>${accessType}</b>\n⏱ Время: <b>${mins} мин</b>`
+          );
+        } catch (e) {
+          if (e.code === 11000) await tgSendToAdmin("❌ Имя пользователя уже занято");
+          else await tgSendToAdmin("❌ Ошибка создания пользователя");
+        }
+        continue;
+      }
+
+      // /users — список пользователей
+      if (text === "/users") {
+        const users = await db.collection("users")
+          .find({ role: { $ne: "admin" } })
+          .sort({ createdAt: -1 })
+          .toArray();
+        if (!users.length) { await tgSendToAdmin("Нет пользователей"); continue; }
+        const list = users.map(u => {
+          const rem = getRemainingSeconds(u);
+          const online = userSockets.has(u._id.toString()) ? "🟢" : "⚫";
+          const remStr = rem === Infinity ? "∞" : Math.floor(rem / 60) + "м";
+          return `${online} <b>${u.username}</b> [${u.accessType}] ${remStr}`;
+        }).join("\n");
+        await tgSendToAdmin(`👥 Пользователи:\n${list}`);
+        continue;
+      }
+
+      // /help
+      if (text === "/help" || text === "/start") {
+        await tgSendToAdmin(
+          `🤖 <b>AI Widget Bot</b>\n\nКоманды:\n` +
+          `/create username password minutes ai|chat — создать пользователя\n` +
+          `/users — список пользователей\n` +
+          `/reply userId текст — ответить пользователю\n\n` +
+          `💡 Или ответьте (reply) на любое сообщение от пользователя чтобы отправить ответ`
+        );
+        continue;
+      }
+
+      // /reply userId текст
+      if (text.startsWith("/reply ")) {
+        const rest = text.slice(7);
+        const spaceIdx = rest.indexOf(" ");
+        if (spaceIdx === -1) { await tgSendToAdmin("❌ /reply userId текст"); continue; }
+        const targetUserId = rest.slice(0, spaceIdx);
+        const content = rest.slice(spaceIdx + 1);
+        await sendAdminReplyToUser(targetUserId, content);
+        await tgSendToAdmin("✅ Сообщение отправлено");
+        continue;
+      }
+
+      // Reply на forwarded сообщение → ответ пользователю
+      if (msg.reply_to_message) {
+        const targetUserId = tgMsgToUser.get(msg.reply_to_message.message_id);
+        if (targetUserId && text) {
+          await sendAdminReplyToUser(targetUserId, text);
+          await tgSendToAdmin("✅ Сообщение отправлено");
+          continue;
+        }
+      }
+    }
+  } catch (e) {
+    console.error("TG polling error:", e.message);
+  }
+}
+
+function startTgPolling() {
+  if (!TG_BOT_TOKEN) return;
+  console.log("✓ Telegram бот запущен");
+  tgSendToAdmin("🟢 Сервер запущен. /help — список команд");
+  // Используем рекурсивный setTimeout для long polling
+  async function poll() {
+    await processTgUpdates();
+    setTimeout(poll, 1000);
+  }
+  poll();
+}
+
 // ── WebSocket ─────────────────────────────────────────────────────────────
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: "/ws" });
@@ -551,6 +731,14 @@ wss.on("connection", (ws) => {
             username: user.username,
           });
 
+          // Уведомление в Telegram
+          if (TG_BOT_TOKEN && ADMIN_TG_ID) {
+            tgSendToAdmin(
+              `🟢 <b>${user.username}</b> вошёл в чат\n` +
+              `<i>Ответьте на его сообщение или используйте /reply ${userId} текст</i>`
+            );
+          }
+
           // Загружаем историю чата и отправляем пользователю
           const history = await db.collection("live_messages")
             .find({ userId })
@@ -597,7 +785,7 @@ wss.on("connection", (ws) => {
       };
       await db.collection("live_messages").insertOne(message);
 
-      // Пересылаем admin-у
+      // Пересылаем admin-у (WS)
       notifyAdmin({
         type:      "new_message",
         userId,
@@ -606,6 +794,22 @@ wss.on("connection", (ws) => {
         messageId: message._id?.toString(),
         createdAt: message.createdAt,
       });
+
+      // Пересылаем admin-у в Telegram
+      if (TG_BOT_TOKEN && ADMIN_TG_ID) {
+        const sent = await tgSendToAdmin(
+          `💬 <b>${authedUser.username}</b>:\n${msg.content}\n\n<i>ID: ${userId}</i>`,
+          { reply_markup: { force_reply: true } }
+        );
+        if (sent?.message_id) {
+          tgMsgToUser.set(sent.message_id, userId);
+          // Чистим старые записи (держим последние 200)
+          if (tgMsgToUser.size > 200) {
+            const firstKey = tgMsgToUser.keys().next().value;
+            tgMsgToUser.delete(firstKey);
+          }
+        }
+      }
 
       // Подтверждение пользователю
       wsSend(ws, {
@@ -663,6 +867,7 @@ wss.on("connection", (ws) => {
 // ── Старт ─────────────────────────────────────────────────────────────────
 connectDB()
   .then(() => {
+    startTgPolling();
     server.listen(PORT, () => {
       console.log(`
   ┌────────────────────────────────────────────────┐
